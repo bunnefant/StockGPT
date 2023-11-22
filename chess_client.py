@@ -2,6 +2,7 @@ import requests
 from config import BASE_URL, HEADERS
 import json
 import chess
+import chess.svg
 import random
 
 
@@ -17,6 +18,7 @@ class ChessClient:
             chess.QUEEN: 'QUEEN',
             chess.KING: 'KING'
         }
+        self.board_image_filepath = 'curr_board.svg'
 
     def start_challenge(self, username):
         s = requests.Session()
@@ -97,12 +99,31 @@ class ChessClient:
 
     ### FILL IN WITH LOGIC TO SELECT WHICH MOVE TO DO
     ### RETURN UCI STRING
-    def get_next_move(self):
+    def compute_next_move(self):
+        game_state = self.get_game_state()
+        legal_moves = self.get_moves()
+        self.get_board_image()
+        print('GAME STATE:')
+        print(game_state)
+        print('LEGAL MOVES:')
+        print(legal_moves)
+        print('BOARD IMAGE:')
+        print(self.board_image_filepath)
+        ### TODO: Query GPT using the game state, legal moves and SVG image of the board
+        ### Currently randomly choosing a legal move
+        ### MUST RETURN VALID UCI STRING ON WHICH MOVE WAS SELECTED
+
         all_legal_moves = list(self.board.legal_moves)
         return random.choice(all_legal_moves).uci()
 
     def make_move(self, game_id, uci_string):
-        requests.post(f'{BASE_URL}/api/bot/game/{game_id}/move/{uci_string}', headers=HEADERS)    
+        requests.post(f'{BASE_URL}/api/bot/game/{game_id}/move/{uci_string}', headers=HEADERS)
+
+    def get_board_image(self):
+        svg = chess.svg.board(self.board)
+        outputfile = open(self.board_image_filepath, "w")
+        outputfile.write(svg)
+        outputfile.close()
 
     def play_game(self, game_id):
         s = requests.Session()
@@ -121,17 +142,12 @@ class ChessClient:
 
                         if len(json_resp['moves'].split()) % 2 == 0 and self.color == 'black':
                             continue
+                        # Keeping track of what move opponent made
                         new_position = json_resp['moves'].split()[-1]
                         self.board.push(chess.Move.from_uci(new_position))
-
-                        game_state = self.get_game_state()
-                        legal_moves = self.get_moves()
-                        print('GAME STATE:')
-                        print(game_state)
-                        print('LEGAL MOVES:')
-                        print(legal_moves)
                         
-                        bot_move = self.get_next_move()
+                        #Compute what move to make based on current game state and available moves
+                        bot_move = self.compute_next_move()
                         self.make_move(game_id, bot_move)
                         self.board.push(chess.Move.from_uci(bot_move))
                         print(self.board)
