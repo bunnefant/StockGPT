@@ -133,6 +133,20 @@ class ChessClient:
     def get_moves(self, color):
         return self.format_moves(self.get_legal_moves(), color)
 
+    def is_legal(self, legal_moves, proposed_move):
+        initial_location = proposed_move[:2]
+        end_location = proposed_move[2:]
+
+        legal_moves_by_line = legal_moves.split('\n')
+        for line in legal_moves_by_line:
+            start_index = line.index('(')
+            if initial_location == line[start_index + 1: start_index + 3]:
+                if end_location in line[start_index + 6:]:
+                    return True
+                else:
+                    return False
+        return False
+
     def write_to_chat(self, message):
         body = {
             'room': 'player',
@@ -204,7 +218,7 @@ class ChessClient:
 
             critic_prompt = f'{self.critic_preamble}\nGAME STATE:\n{game_state}\nLEGAL MOVES:\n{legal_moves}\nVISUAL GAME STATE:\n{self.board}\nOPPONENT MOVE:\n{opp_move}\nOUR PROPOSED MOVE:\n{proposed_move}\nOPPONENT LEGAL MOVES AFTER PROPOSED MOVE:\n{opp_legal_moves}'
             print(critic_prompt)
-            if proposed_move not in legal_moves:
+            if not self.is_legal(legal_moves, proposed_move):
                 critique = f'The proposed move is illegal! STATUS: FAIL'
             else:
                 critique = self.critic_agent.query(critic_prompt)
