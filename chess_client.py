@@ -23,36 +23,47 @@ class ChessClient:
         self.game_id = None
         self.agent = GPTAgent()
         self.critic_agent = GPTAgent()
-        self.critic_preamble = 'Please conduct a systematic evaluation of the proposed move, \
-            specifically checking for any immediate capturing threats to the piece being moved. \
-            They are not important threats if you can capture a equally important or more important piece right back with your next move. \
-            Confirm the safety of the piece post-move by examining all possible opponent\'s responses,\
-            including any capturing possibilities by pawns. Emphasize the protection and \
-            control of key squares around the moved piece and provide a tactical review of the new \
-            position to ensure no chess motifs have been overlooked. Keep in mind the direction of pieces \
-            like pawns, the white pawns move up the ranks from 1 to 8, and the black pawns move down the \
-            ranks from 8 to 1. I have provided you with the game state, the current position of all pieces, \
+        self.critic_preamble = 'Please conduct a systematic evaluation of the proposed move. \
+            Your role is to identify the greatest threat posed by the enemy, and decide if the proposed move leads to our best outcome.\
+            Keep in mind, the best move might not be immediately winning. \
+            You should begin your analysis by ensuring our king is not in any immediate danger of being checkmated. \
+            Next you should identify all potential moves the opponent can make that would capture one of our pieces. \
+            Each of these moves should be closely analyzed to ensure we do not accidentally sacrifice pieces of value. \
+            Prioritize the safety of our most valuable pieces first. \
+            When judging a trade. Keep in mind the value of different pieces: \
+            Queen: 9, Rook: 5, Bishop: 3, Knight: 3, Pawn: 1. \
+            \
+            I have provided you with the game state, the current position of all pieces, \
             the proposed move, and a list of legal moves the opponent can take. Please reason about this, \
-            and state if the move is unreasonable and puts \
-            our moved piece or king into harms way. Please end your response in the following format "STATUS: SUCCESS" \
-            or "STATUS: FAIL"'
+            and state if the move is unreasonable. If the move is unreasonable please address the biggest threat the opponent has that needs to be addressed.\
+            \
+            Please end your response in the following format "STATUS: SUCCESS" or "STATUS: FAIL"'
         self.preamble = 'You are an aggressive chess bot that will evaluate a given game state and list of legal moves and propose \
             the best next move. Please reason about why you chose this specific move and consider the position your \
-            opponent is in and if they can take advantage of your move. Losing pieces can be good when you can get a better piece in return \
-            or if you can trade evenly matched pieces. Also look for opportunities to try to force a checkmate \
-            on your opponent or to take an undefended piece from your opponent with no repercussions. Also look to engage in trades that will benefit you materially. We will be conducting \
-            this analysis in multiple rounds, so after the first round you will also have to consider any passed in critique \
-            about previously suggested moves. We will also additionally pass in the move that was just played by the opponent to give a better idea of what may be important to focus on and how to counterplay when deciding your move. Please let this additional information guide your decision on choosing a \
-            better move. You can only select a move in the list of legal moves provided. Please end your response in the following format "UCI: <UCI-STRING>" with only 1 proposed move.'
+            opponent is in and if they can take advantage of your move. First attempt to identify any weaknesses in the opponents position, \
+            such as an undefended piece, or king safety issues. Check all capturing moves for any obvious weaknesses in the opponents position.\
+            If no immediate weakness can be found, then focus on improving our position by listening to the conceptual advice for this current stage of the game. \
+            \
+            We will be conducting this analysis in multiple rounds, after the first round you will also have to consider any passed in critique \
+            about the previously suggested moves. The critique will identify threats you may have overlooked, ensure your next move properly addresses the critique.\
+            \
+            You can only select a move in the list of legal moves provided. Please end your response in the following format "UCI: <UCI-STRING>" with only 1 proposed move.'
         self.opening_prompt = ' You are still in a chess opening. Keep that in mind when you decide on your move to play. \
-            Take as much space as possible without hanging any pieces and while capturing any of the opponent\'s pieces \
-            that result in a material advantage for you.'
+            Here are some key opening principles to keep in mind while deciding your move. \
+            1) Develop your pieces. Get all your pieces out and into the game early, most specifically bishops and knights. \
+            2) Control the center. The center is the most valuable area to control on the chess board in the early game. \
+            3) Keep the queen safe. Moving the queen out too far early can make it a target. \
+            4) Castle the king. Develop pieces so the king can castle, and be safe.\
+            Keep in mind all of these concepts are very general, and there are exceptions to each of them. \
+            For example, moving the queen out early is worth it if we are gaining material.\
+            Use these concepts when there is no obvious advantageous move.'
         self.mid_game_prompt = ' You are now in a chess mid game. Keep that in mind when deciding the optimal move. Find good positions \
             on the board for your pieces without losing them. Prevent your opponent from getting material advantages and prevent them \
             from finding good squares for their own pieces.'
         self.end_game_prompt = ' You are now in a chess end game. Keep that in mind when you make your move. Make sure to \
             find places on the board where you have the advantage and push on that side of the board while defending your pieces \
-            and limiting the opponent\'s ability to push their own advantage.'
+            and limiting the opponent\'s ability to push their own advantage. This is also the point in the game where the king becomes \
+            a more valuable piece. Consider activating the king and finding ways where it can help in making progress.'
 
     def start_challenge(self, username):
         s = requests.Session()
@@ -136,16 +147,22 @@ class ChessClient:
     def is_legal(self, legal_moves, proposed_move):
         initial_location = proposed_move[:2]
         end_location = proposed_move[2:]
-
+        
         legal_moves_by_line = legal_moves.split('\n')
         for line in legal_moves_by_line:
-            start_index = line.index('(')
+            try:
+                start_index = line.index('(')
+            except ValueError as e:
+                print(f"Legal moves:\n{legal_moves}\
+                      \nLine: {line}")
+                raise e
             if initial_location == line[start_index + 1: start_index + 3]:
                 if end_location in line[start_index + 6:]:
                     return True
                 else:
                     return False
         return False
+        
 
     def write_to_chat(self, message):
         body = {
@@ -157,7 +174,7 @@ class ChessClient:
 
     def get_game_status(self):
         moves = self.board.fullmove_number
-        if moves < 5:
+        if moves < 8:
             return 'OPENING'
 
         white_pieces = self.get_piece_positions(True)
@@ -291,5 +308,5 @@ class ChessClient:
 
 
 client = ChessClient()
-client.start_challenge('bunnefant')
+client.start_challenge('StockGPT')
 client.play_game()
