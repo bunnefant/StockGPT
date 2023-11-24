@@ -37,10 +37,11 @@ class ChessClient:
             or "STATUS: FAIL"'
         self.preamble = 'You are a chess bot that will evaluate a given game state and list of legal moves and propose \
             the best next move. Please reason about why you chose this specific move and consider the position your \
-            opponent is in and if they can take advantage of your move. We will be conducting this analysis in multiple rounds, \
-            so after the first round you will also have to consider any passed in critique about previously suggested moves. \
-            Please let this additional information guide your decision on choosing a better move. Please end your response in the following \
-            format "UCI: <UCI-STRING>"'
+            opponent is in and if they can take advantage of your move. Also look for openings to try to force a checkmate \
+            on your opponent or to take an undefended piece from your opponent with no repercussions. Also look to engage in trades that will benefit us materially. We will be conducting \
+            this analysis in multiple rounds, so after the first round you will also have to consider any passed in critique \
+            about previously suggested moves. We will also additionally pass in the move that was just played by the opponent to give a better idea of what may be important to focus on and how to counterplay when deciding your move. Please let this additional information guide your decision on choosing a \
+            better move. Please end your response in the following format "UCI: <UCI-STRING>"'
 
     def start_challenge(self, username):
         s = requests.Session()
@@ -55,7 +56,6 @@ class ChessClient:
             for line in resp.iter_lines():
                 if line:
                     json_resp  = json.loads(line)
-                    print(json_resp)
                     if 'challenge' in json_resp:
                         game_id = json_resp['challenge']['id']
                         self.color = json_resp['challenge']['color']
@@ -129,7 +129,7 @@ class ChessClient:
             
     ### FILL IN WITH LOGIC TO SELECT WHICH MOVE TO DO
     ### RETURN UCI STRING
-    def compute_next_move(self):
+    def compute_next_move(self, opp_move, captured=None):
         game_state = self.get_game_state()
         legal_moves = self.get_moves(self.color)
         self.get_board_image()
@@ -137,30 +137,27 @@ class ChessClient:
         critique = ''
         proposed_move = ''
         for _ in range(3):        
-            prompt = f'{self.preamble}\nGAME STATE:\n{game_state}\nLEGAL MOVES:\n{legal_moves}\nVISUAL GAME STATE:\n{self.board}\n'
+            prompt = f'{self.preamble}\nGAME STATE:\n{game_state}\nLEGAL MOVES:\n{legal_moves}\nVISUAL GAME STATE:\n{self.board}\nOPPONENT MOVE:\n{opp_move}\n'
+            if captured:
+                prompt += f'OPPONENT MOVE RESULTED IN CAPTURE OF FOLLOWING PIECE:\n{chess.piece_name(captured)}'
+                print(prompt)
             if critique != '' and proposed_move != '':
                 prompt += f'PREVIOUS PROPOSED MOVE:\n{proposed_move}\nCRITIQUE ABOUT PREVIOUS PROPOSED MOVE:\n{critique}\n'
             resp = self.agent.query(prompt)
-            proposed_move = resp.split("UCI: ")[-1].strip('.')
-            self.write_to_chat("RESPONSE")
-            n = 140
-            resp_list = [resp[i:i+n] for i in range(0, len(resp), n)]
-            for chunk in resp_list:
-                self.write_to_chat(chunk)
+            proposed_move = resp.split("UCI: ")[-1].strip('."')
+            print('GPT RESPONSE:')
+            print(resp)
+            print('--------------------------')
+
             self.board.push(chess.Move.from_uci(proposed_move))
             opp_legal_moves = self.get_moves('black' if self.color == 'white' else 'white')
             self.board.pop()
 
-            critic_prompt = f'{self.critic_preamble}\nGAME STATE:\n{game_state}\nLEGAL MOVES:\n{legal_moves}\nVISUAL GAME STATE:\n{self.board}\nPROPOSED MOVE:\n{proposed_move}\nOPPONENT LEGAL MOVES AFTER PROPOSED MOVE:\n{opp_legal_moves}'
+            critic_prompt = f'{self.critic_preamble}\nGAME STATE:\n{game_state}\nLEGAL MOVES:\n{legal_moves}\nVISUAL GAME STATE:\n{self.board}\nOPPONENT MOVE:\n{opp_move}\nOUR PROPOSED MOVE:\n{proposed_move}\nOPPONENT LEGAL MOVES AFTER PROPOSED MOVE:\n{opp_legal_moves}'
             critique = self.critic_agent.query(critic_prompt)
-            self.write_to_chat("CRITIQUE")
-            self.write_to_chat(critique)
-
-            resp_list = [critique[i:i+n] for i in range(0, len(critique), n)]
-            for chunk in resp_list:
-                self.write_to_chat(chunk)
-            self.write_to_chat('-----------------------------')
-            if critique.split("STATUS: ")[-1].strip('.') == 'SUCCESS':
+            print('CRITIQUE')
+            print(critique)
+            if critique.split("STATUS: ")[-1].strip('."') == 'SUCCESS':
                 break
         return proposed_move
 
@@ -183,7 +180,6 @@ class ChessClient:
             for line in resp.iter_lines():
                 if line:
                     json_resp  = json.loads(line)
-                    print(json_resp)
                     if json_resp['type'] == 'gameState':
                         if json_resp['status'] != 'started':
                             resp.close()
@@ -197,13 +193,17 @@ class ChessClient:
                             continue
                         # Keeping track of what move opponent made
                         new_position = json_resp['moves'].split()[-1]
-                        self.board.push(chess.Move.from_uci(new_position))
+                        opp_move = chess.Move.from_uci(new_position)
+                        cap = None
+                        if self.board.is_capture(opp_move):
+                            cap = self.board.piece_at(opp_move.to_square).piece_type
+                        self.board.push(opp_move)
                         
                         #Compute what move to make based on current game state and available moves
-                        bot_move = self.compute_next_move()
+                        bot_move = self.compute_next_move(new_position, cap)
                         self.make_move(bot_move)
                         self.board.push(chess.Move.from_uci(bot_move))
-                        print(self.board)
+                        # print(self.board)
                         print('Waiting for opponent move...')
 
                     elif json_resp['type'] == 'gameFull':
