@@ -35,13 +35,13 @@ class ChessClient:
             and state if the move is unreasonable and puts \
             our moved piece or king into harms way. Please end your response in the following format "STATUS: SUCCESS" \
             or "STATUS: FAIL"'
-        self.preamble = 'You are a chess bot that will evaluate a given game state and list of legal moves and propose \
+        self.preamble = 'You are an aggressive chess bot that will evaluate a given game state and list of legal moves and propose \
             the best next move. Please reason about why you chose this specific move and consider the position your \
             opponent is in and if they can take advantage of your move. Also look for openings to try to force a checkmate \
             on your opponent or to take an undefended piece from your opponent with no repercussions. Also look to engage in trades that will benefit us materially. We will be conducting \
             this analysis in multiple rounds, so after the first round you will also have to consider any passed in critique \
             about previously suggested moves. We will also additionally pass in the move that was just played by the opponent to give a better idea of what may be important to focus on and how to counterplay when deciding your move. Please let this additional information guide your decision on choosing a \
-            better move. Please end your response in the following format "UCI: <UCI-STRING>"'
+            better move. It is imperitive that you select a move that is present in the list of legal moves provided. Please end your response in the following format "UCI: <UCI-STRING>" with only 1 proposed move.'
 
     def start_challenge(self, username):
         s = requests.Session()
@@ -126,23 +126,51 @@ class ChessClient:
             'text': message
         }
         requests.post(f'{LICHESS_BASE_URL}/api/bot/game/{self.game_id}/chat', headers=LICHESS_HEADERS, json=body)
+
+    def get_game_status(self):
+        moves = self.board.fullmove_number
+        if moves < 5:
+            return 'OPENING'
+
+        white_pieces = self.get_piece_positions(True)
+        black_pieces = self.get_piece_positions(False)
+
+        num_white = 0
+        for piece in white_pieces:
+            if piece != 'PAWN':
+                num_white += len(white_pieces[piece])
+
+        num_black = 0
+        for piece in black_pieces:
+            if piece != 'PAWN':
+                num_black += len(black_pieces[piece])
+        if num_black < 4 or num_white < 4:
+            return 'END'
+        else:
+            return 'MID'
             
     ### FILL IN WITH LOGIC TO SELECT WHICH MOVE TO DO
     ### RETURN UCI STRING
     def compute_next_move(self, opp_move, captured=None):
         game_state = self.get_game_state()
         legal_moves = self.get_moves(self.color)
-        self.get_board_image()
+        # self.get_board_image()
+
+        game_status = self.get_game_status()
+
 
         critique = ''
         proposed_move = ''
-        for _ in range(3):        
+        for _ in range(3):     
+            print(game_status)
+
             prompt = f'{self.preamble}\nGAME STATE:\n{game_state}\nLEGAL MOVES:\n{legal_moves}\nVISUAL GAME STATE:\n{self.board}\nOPPONENT MOVE:\n{opp_move}\n'
             if captured:
                 prompt += f'OPPONENT MOVE RESULTED IN CAPTURE OF FOLLOWING PIECE:\n{chess.piece_name(captured)}'
                 print(prompt)
             if critique != '' and proposed_move != '':
                 prompt += f'PREVIOUS PROPOSED MOVE:\n{proposed_move}\nCRITIQUE ABOUT PREVIOUS PROPOSED MOVE:\n{critique}\n'
+            print(prompt)
             resp = self.agent.query(prompt)
             proposed_move = resp.split("UCI: ")[-1].strip('."')
             print('GPT RESPONSE:')
@@ -154,11 +182,13 @@ class ChessClient:
             self.board.pop()
 
             critic_prompt = f'{self.critic_preamble}\nGAME STATE:\n{game_state}\nLEGAL MOVES:\n{legal_moves}\nVISUAL GAME STATE:\n{self.board}\nOPPONENT MOVE:\n{opp_move}\nOUR PROPOSED MOVE:\n{proposed_move}\nOPPONENT LEGAL MOVES AFTER PROPOSED MOVE:\n{opp_legal_moves}'
+            print(critic_prompt)
             critique = self.critic_agent.query(critic_prompt)
             print('CRITIQUE')
             print(critique)
             if critique.split("STATUS: ")[-1].strip('."') == 'SUCCESS':
                 break
+        print(proposed_move)
         return proposed_move
 
 
