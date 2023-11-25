@@ -1,5 +1,6 @@
 import requests
 from config import LICHESS_BASE_URL, LICHESS_HEADERS
+from secret import LICHESS_USERNAME
 import json
 import chess
 import chess.svg
@@ -26,7 +27,8 @@ class ChessClient:
         self.critic_preamble = 'Please conduct a systematic evaluation of the proposed move. \
             Your role is to identify the greatest threat posed by the enemy, and decide if the proposed move leads to our best outcome.\
             Keep in mind, the best move might not be immediately winning. \
-            You should begin your analysis by ensuring our king is not in any immediate danger of being checkmated. \
+            You should begin by first asking why the opponent made that move.\
+            Then you should begin your analysis by ensuring our king is not in any immediate danger of being checkmated. \
             Next you should identify all potential moves the opponent can make that would capture one of our pieces. \
             Each of these moves should be closely analyzed to ensure we do not accidentally sacrifice pieces of value. \
             Prioritize the safety of our most valuable pieces first. \
@@ -36,13 +38,16 @@ class ChessClient:
             I have provided you with the game state, the current position of all pieces, \
             the proposed move, and a list of legal moves the opponent can take. Please reason about this, \
             and state if the move is unreasonable. If the move is unreasonable please address the biggest threat the opponent has that needs to be addressed.\
+            Ensure you evaluate what is gained by the proposed move as well, if we capture their queen and they capture our rook it is still beneficial.\
             \
             Please end your response in the following format "STATUS: SUCCESS" or "STATUS: FAIL"'
-        self.preamble = 'You are an aggressive chess bot that will evaluate a given game state and list of legal moves and propose \
-            the best next move. Please reason about why you chose this specific move and consider the position your \
+        self.prefix = 'You are an aggressive chess bot that will evaluate a given game state and list of legal moves and propose \
+            the best next move.'
+        self.body = 'Please reason about why you chose this specific move and consider the position your \
             opponent is in and if they can take advantage of your move. First attempt to identify any weaknesses in the opponents position, \
-            such as an undefended piece, or king safety issues. Check all capturing moves for any obvious weaknesses in the opponents position.\
-            If no immediate weakness can be found, then focus on improving our position by listening to the conceptual advice for this current stage of the game. \
+            such as an undefended piece, or king safety issues. Your first priority is to look for checks, and examine if any lead to a checkmate, or material gain.\
+            Next, you should examine all captures. Ensure you check all captures and capitalize if the opponent leaves a piece unprotected or not properly defended.\
+            Next, you should consider any attacks you can make on their pieces. Next conclude by identifying which move you think is the strongest.\
             \
             We will be conducting this analysis in multiple rounds, after the first round you will also have to consider any passed in critique \
             about the previously suggested moves. The critique will identify threats you may have overlooked, ensure your next move properly addresses the critique.\
@@ -215,7 +220,7 @@ class ChessClient:
             else:
                 stage_prompt = self.end_game_prompt
 
-            prompt = f'{self.preamble}{stage_prompt}\nGAME STATE:\n{game_state}\nLEGAL MOVES:\n{legal_moves}\nVISUAL GAME STATE:\n{self.board}\nOPPONENT MOVE:\n{opp_move}\n'
+            prompt = f'{self.prefix}{stage_prompt}{self.body}\nGAME STATE:\n{game_state}\nLEGAL MOVES:\n{legal_moves}\nVISUAL GAME STATE:\n{self.board}\nOPPONENT MOVE:\n{opp_move}\n'
             if captured:
                 prompt += f'OPPONENT MOVE RESULTED IN CAPTURE OF FOLLOWING PIECE:\n{chess.piece_name(captured)}'
                 print(prompt)
@@ -308,5 +313,5 @@ class ChessClient:
 
 
 client = ChessClient()
-client.start_challenge('StockGPT')
+client.start_challenge(LICHESS_USERNAME)
 client.play_game()
