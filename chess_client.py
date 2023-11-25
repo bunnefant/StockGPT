@@ -142,32 +142,49 @@ class ChessClient:
             piece, start = move
             curr_piece = f'{color} {self.pieces[piece].lower()} ({start}): '
             for target in legal_move_dict[move]:
-                curr_piece += f'{target}, '
+                captured_piece = self.move_capture(chess.Move.from_uci(f'{start}{target}'))
+                if captured_piece != None:
+                    curr_piece += f'{target} (capture {captured_piece}), '
+                else:
+                    curr_piece += f'{target}, '
             out += curr_piece[:-2] + '\n'
         return out
+    
+    def get_attacked_squares(self, opp_color):
+        attacks = {}
+        for piece in self.pieces:
+            squares = self.board.pieces(piece, self.color == 'white')
+            for square in squares:
+                attacked = self.board.attacks(square)
+                for atk in attacked:
+                    # opp_color = opp_color == 'white'
+                    if self.board.piece_at(atk) != None and self.board.color_at(atk) == opp_color:
+                        if chess.piece_name(piece) not in attacks:
+                            attacks[(chess.piece_name(piece), chess.square_name(square))] = []
+                        attacks[(chess.piece_name(piece), chess.square_name(square))].append(chess.square_name(atk))
+        print(attacks)
+        return attacks
+    
+    def format_attacks(self, attacks):
+        out = ''
+        for move in attacks:
+            piece, start = move
+            curr_piece = f'{piece} ({start}): '
+            for target in attacks[move]:
+                captured_piece = self.move_capture(chess.Move.from_uci(f'{start}{target}'))
+                curr_piece += f'{target} (capture {captured_piece}), '
+
+            out += curr_piece[:-2] + '\n'
+        return out
+    
+    def get_attacks(self, opp_color):
+        return self.format_attacks(self.get_attacked_squares(opp_color))
 
     def get_moves(self, color):
         return self.format_moves(self.get_legal_moves(), color)
 
-    def is_legal(self, legal_moves, proposed_move):
-        initial_location = proposed_move[:2]
-        end_location = proposed_move[2:]
-        
-        legal_moves_by_line = legal_moves.split('\n')
-        for line in legal_moves_by_line:
-            try:
-                start_index = line.index('(')
-            except ValueError as e:
-                print(f"Legal moves:\n{legal_moves}\
-                      \nLine: {line}")
-                raise e
-            if initial_location == line[start_index + 1: start_index + 3]:
-                if end_location in line[start_index + 6:]:
-                    return True
-                else:
-                    return False
-        return False
-        
+    def is_legal(self, proposed_move):
+        return chess.Move.from_uci(proposed_move) in list(self.board.legal_moves)      
 
     def write_to_chat(self, message):
         body = {
@@ -198,10 +215,15 @@ class ChessClient:
             return 'END'
         else:
             return 'MID'
+        
+    def move_capture(self, move):
+        if self.board.is_capture(move):
+            return chess.piece_name(self.board.piece_at(move.to_square).piece_type)
+        return None
 
     # FILL IN WITH LOGIC TO SELECT WHICH MOVE TO DO
     # RETURN UCI STRING
-    def compute_next_move(self, opp_move, captured=None):
+    def compute_next_move(self, opp_move, captured_by_opp=None):
         game_state = self.get_game_state()
         legal_moves = self.get_moves(self.color)
         # self.get_board_image()
@@ -212,7 +234,6 @@ class ChessClient:
         proposed_move = ''
         last_proposed_legal_move = None
         for _ in range(3):
-            print(game_status)
             if game_status == 'OPENING':
                 stage_prompt = self.opening_prompt
             elif game_status == 'MID':
@@ -221,9 +242,8 @@ class ChessClient:
                 stage_prompt = self.end_game_prompt
 
             prompt = f'{self.prefix}{stage_prompt}{self.body}\nGAME STATE:\n{game_state}\nLEGAL MOVES:\n{legal_moves}\nVISUAL GAME STATE:\n{self.board}\nOPPONENT MOVE:\n{opp_move}\n'
-            if captured:
-                prompt += f'OPPONENT MOVE RESULTED IN CAPTURE OF FOLLOWING PIECE:\n{chess.piece_name(captured)}'
-                print(prompt)
+            if captured_by_opp:
+                prompt += f'OPPONENT MOVE RESULTED IN CAPTURE OF FOLLOWING PIECE:\n{captured_by_opp}'
             if critique != '' and proposed_move != '':
                 prompt += f'PREVIOUS PROPOSED MOVE:\n{proposed_move}\nCRITIQUE ABOUT PREVIOUS PROPOSED MOVE:\n{critique}\n'
             print(prompt)
@@ -232,15 +252,28 @@ class ChessClient:
             print('GPT RESPONSE:')
             print(resp)
             print('--------------------------')
+            try:
+                move = chess.Move.from_uci(proposed_move)
+            except chess.InvalidMoveError:
+                critique = f'The proposed move is illegal! STATUS: FAIL'
+                continue
+            captured_by_us = self.move_capture(move)
 
-            self.board.push(chess.Move.from_uci(proposed_move))
+            self.board.push(move)
             opp_legal_moves = self.get_moves(
                 'black' if self.color == 'white' else 'white')
+
+            attacks = self.get_attacks(opp_color=self.color == 'black')
+
             self.board.pop()
 
-            critic_prompt = f'{self.critic_preamble}\nGAME STATE:\n{game_state}\nLEGAL MOVES:\n{legal_moves}\nVISUAL GAME STATE:\n{self.board}\nOPPONENT MOVE:\n{opp_move}\nOUR PROPOSED MOVE:\n{proposed_move}\nOPPONENT LEGAL MOVES AFTER PROPOSED MOVE:\n{opp_legal_moves}'
+            critic_prompt = f'{self.critic_preamble}\nGAME STATE:\n{game_state}\nOUR LEGAL MOVES:\n{legal_moves}\nVISUAL GAME STATE:\n{self.board}\nOPPONENT MOVE:\n{opp_move}\nOUR PROPOSED MOVE:\n{proposed_move}\nOPPONENT LEGAL MOVES AFTER OUR PROPOSED MOVE:\n{opp_legal_moves}'
+            if captured_by_opp:
+                prompt += f'\nOPPONENT MOVE RESULTED IN CAPTURE OF FOLLOWING PIECE:\n{captured_by_opp}'
+            if captured_by_us:
+                critic_prompt += f'\nOPPONENT PIECE CAPTURED AFTER OUR PROPOSED MOVE:\n{captured_by_us}'
             print(critic_prompt)
-            if not self.is_legal(legal_moves, proposed_move):
+            if not self.is_legal(proposed_move):
                 critique = f'The proposed move is illegal! STATUS: FAIL'
             else:
                 critique = self.critic_agent.query(critic_prompt)
@@ -249,12 +282,13 @@ class ChessClient:
             print(critique)
             if critique.split("STATUS: ")[-1].strip('."') == 'SUCCESS':
                 break
-        print(last_proposed_legal_move)
         if last_proposed_legal_move is None:
             print("ALL PROPOSED MOVES WERE ILLEGAL. GPT IS VERY STUPID!")
             print("ALL PROPOSED MOVES WERE ILLEGAL. GPT IS VERY STUPID!")
             print("ALL PROPOSED MOVES WERE ILLEGAL. GPT IS VERY STUPID!")
-            last_proposed_legal_move = legal_moves.split(', ')[-1]
+            all_legal_moves = list(self.board.legal_moves)
+            proposed_move = random.choice(all_legal_moves).uci()
+        print('DONE SELECTING MOVE!!')
         return proposed_move
 
         # all_legal_moves = list(self.board.legal_moves)
@@ -290,10 +324,11 @@ class ChessClient:
                         # Keeping track of what move opponent made
                         new_position = json_resp['moves'].split()[-1]
                         opp_move = chess.Move.from_uci(new_position)
-                        cap = None
-                        if self.board.is_capture(opp_move):
-                            cap = self.board.piece_at(
-                                opp_move.to_square).piece_type
+                        # cap = None
+                        cap = self.move_capture(opp_move)
+                        # if self.board.is_capture(opp_move):
+                        #     cap = self.board.piece_at(
+                        #         opp_move.to_square).piece_type
                         self.board.push(opp_move)
 
                         # Compute what move to make based on current game state and available moves

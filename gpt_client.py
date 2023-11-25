@@ -12,6 +12,9 @@ class GPTAgent:
             "temperature": 0.7
         }
         r = requests.post(f'{GPT_BASE_URL}/v1/chat/completions', headers=GPT_HEADERS, json=body)
+        if 'error' in r.json():
+            print(r.json())
+            raise Exception('Error in game creation')
         return r.json()['choices'][0]['message']['content']
 
 # agent = GPTAgent()
