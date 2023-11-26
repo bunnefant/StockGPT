@@ -9,9 +9,13 @@ from gpt_client import GPTAgent
 
 
 class ChessClient:
-    def __init__(self):
+    def __init__(self, fen=None):
+        self.fen = fen
         self.color = None
-        self.board = chess.Board()
+        if fen != None:
+            self.board = chess.Board(fen)
+        else:
+            self.board = chess.Board()
         self.pieces = {
             chess.PAWN: 'PAWN',
             chess.KNIGHT: 'KNIGHT',
@@ -24,6 +28,7 @@ class ChessClient:
         self.game_id = None
         self.agent = GPTAgent()
         self.critic_agent = GPTAgent()
+        self.color_prompt = f'You are playing as {self.color} in this game of chess. You may also be starting in the middle of a chess game.'
         self.critic_preamble = 'Please conduct a systematic evaluation of the proposed move. \
             Your role is to identify the greatest threat posed by the enemy, and decide if the proposed move leads to our best outcome.\
             Keep in mind, the best move might not be immediately winning. \
@@ -70,25 +75,35 @@ class ChessClient:
             and limiting the opponent\'s ability to push their own advantage. This is also the point in the game where the king becomes \
             a more valuable piece. Consider activating the king and finding ways where it can help in making progress.'
 
-    def start_challenge(self, username):
+    def start_challenge(self, username, fen=None):
         s = requests.Session()
 
         challenge_body = {
             'keepAliveStream': True,
-            'color': 'black'
+            'color': 'black',
+            'level': 1,
         }
+        if self.fen != None:
+            challenge_body['fen'] = self.fen
         game_id = None
         with s.post(f'{LICHESS_BASE_URL}/api/challenge/{username}', headers=LICHESS_HEADERS, json=challenge_body, stream=True) as resp:
             print('Sent out challenge.')
             for line in resp.iter_lines():
                 if line:
                     json_resp = json.loads(line)
+                    print(json_resp)
                     if 'challenge' in json_resp:
                         game_id = json_resp['challenge']['id']
                         self.color = json_resp['challenge']['color']
                     if 'done' in json_resp and json_resp['done'] != 'accepted':
                         raise Exception('Game was not properly accepted')
-        print('Game was accepted.')
+                    
+                    if username == 'ai':
+                        if 'id' in json_resp:
+                            game_id = json_resp['id']
+                            self.color = 'black'
+                            break
+                    
         self.game_id = game_id
         return game_id
 
@@ -226,6 +241,8 @@ class ChessClient:
     def compute_next_move(self, opp_move, captured_by_opp=None):
         game_state = self.get_game_state()
         legal_moves = self.get_moves(self.color)
+        print(self.board.is_check())
+        print('ARE WE IN CHECK')
         # self.get_board_image()
 
         game_status = self.get_game_status()
@@ -241,7 +258,7 @@ class ChessClient:
             else:
                 stage_prompt = self.end_game_prompt
 
-            prompt = f'{self.prefix}{stage_prompt}{self.body}\nGAME STATE:\n{game_state}\nLEGAL MOVES:\n{legal_moves}\nVISUAL GAME STATE:\n{self.board}\nOPPONENT MOVE:\n{opp_move}\n'
+            prompt = f'{self.color_prompt}{self.prefix}{stage_prompt}{self.body}\nGAME STATE:\n{game_state}\nLEGAL MOVES:\n{legal_moves}\nVISUAL GAME STATE:\n{self.board}\nOPPONENT MOVE:\n{opp_move}\n'
             if captured_by_opp:
                 prompt += f'OPPONENT MOVE RESULTED IN CAPTURE OF FOLLOWING PIECE:\n{captured_by_opp}'
             if critique != '' and proposed_move != '':
@@ -254,6 +271,8 @@ class ChessClient:
             print('--------------------------')
             try:
                 move = chess.Move.from_uci(proposed_move)
+                if not self.is_legal(proposed_move):
+                    critique = f'The proposed move is illegal! STATUS: FAIL'
             except chess.InvalidMoveError:
                 critique = f'The proposed move is illegal! STATUS: FAIL'
                 continue
@@ -287,9 +306,9 @@ class ChessClient:
             print("ALL PROPOSED MOVES WERE ILLEGAL. GPT IS VERY STUPID!")
             print("ALL PROPOSED MOVES WERE ILLEGAL. GPT IS VERY STUPID!")
             all_legal_moves = list(self.board.legal_moves)
-            proposed_move = random.choice(all_legal_moves).uci()
+            last_proposed_legal_move = random.choice(all_legal_moves).uci()
         print('DONE SELECTING MOVE!!')
-        return proposed_move
+        return last_proposed_legal_move
 
         # all_legal_moves = list(self.board.legal_moves)
         # return random.choice(all_legal_moves).uci()
@@ -304,22 +323,32 @@ class ChessClient:
         outputfile.write(svg)
         outputfile.close()
 
-    def play_game(self):
+    def play_game(self, start=False):
         s = requests.Session()
         with s.get(f'{LICHESS_BASE_URL}/api/bot/game/stream/{self.game_id}', headers=LICHESS_HEADERS, stream=True) as resp:
+            print('here')
             for line in resp.iter_lines():
                 if line:
                     json_resp = json.loads(line)
+                    print(json_resp)
+                    if 'state' in json_resp:
+                        json_resp = json_resp['state']
                     if json_resp['type'] == 'gameState':
                         if json_resp['status'] != 'started':
                             resp.close()
                             print('Opponent resigned.')
                             break
 
-                        if len(json_resp['moves'].split()) % 2 == 1 and self.color == 'white':
+                        if len(json_resp['moves'].split()) % 2 == 1 and self.color == 'white' and not start:
                             continue
 
-                        if len(json_resp['moves'].split()) % 2 == 0 and self.color == 'black':
+                        if len(json_resp['moves'].split()) % 2 == 0 and self.color == 'black' and not start:
+                            continue
+
+                        if start:
+                            bot_move = self.compute_next_move('')
+                            self.make_move(bot_move)
+                            self.board.push(chess.Move.from_uci(bot_move))
                             continue
                         # Keeping track of what move opponent made
                         new_position = json_resp['moves'].split()[-1]
@@ -340,13 +369,14 @@ class ChessClient:
 
                     elif json_resp['type'] == 'gameFull':
                         if self.color == 'white':
-                            bot_move = self.get_next_move()
+                            bot_move = self.compute_next_move()
                             self.make_move(bot_move)
                             self.board.push(chess.Move.from_uci(bot_move))
+                    
 
         print('Exiting Game')
 
 
 client = ChessClient()
-client.start_challenge(LICHESS_USERNAME)
+client.start_challenge('ai')
 client.play_game()
