@@ -29,51 +29,26 @@ class ChessClient:
         self.agent = GPTAgent()
         self.critic_agent = GPTAgent()
         self.color_prompt = f'You are playing as {self.color} in this game of chess. You may also be starting in the middle of a chess game.'
-        self.critic_preamble = 'Please conduct a systematic evaluation of the proposed move. \
-            Your role is to identify the greatest threat posed by the enemy, and decide if the proposed move leads to our best outcome.\
-            Keep in mind, the best move might not be immediately winning. \
-            You should begin by first asking why the opponent made that move.\
-            Then you should begin your analysis by ensuring our king is not in any immediate danger of being checkmated. \
-            Next you should identify all potential moves the opponent can make that would capture one of our pieces. \
-            Each of these moves should be closely analyzed to ensure we do not accidentally sacrifice pieces of value. \
-            Prioritize the safety of our most valuable pieces first. \
-            When judging a trade. Keep in mind the value of different pieces: \
-            Queen: 9, Rook: 5, Bishop: 3, Knight: 3, Pawn: 1. \
-            \
-            I have provided you with the game state, the current position of all pieces, \
-            the proposed move, and a list of legal moves the opponent can take. Please reason about this, \
-            and state if the move is unreasonable. If the move is unreasonable please address the biggest threat the opponent has that needs to be addressed.\
-            Ensure you evaluate what is gained by the proposed move as well, if we capture their queen and they capture our rook it is still beneficial.\
-            \
-            Please end your response in the following format "STATUS: SUCCESS" or "STATUS: FAIL"'
+        self.critic_preamble = 'Please conduct a systematic evaluation of the proposed move. Your role is to identify the greatest threat posed by the enemy, and decide if the proposed move leads to our best outcome. You should begin by first asking why the opponent made that move. Then you should begin your analysis by ensuring our king is not in any immediate danger of being checkmated. We will be passing in all of the moves the opponent can respond with to our proposed move. Each of these moves should be closely analyzed to ensure we do not accidentally sacrifice pieces of value. Prioritize the safety of our most valuable pieces first. When judging a trade, keep in mind the value of different pieces: Queen: 9, Rook: 5, Bishop: 3, Knight: 3, Pawn: 1. If you are ahead materially or about tied then encourage even trades. Encourage trading if it results in us being in an improved position. If you can take an opponents piece with a less valuable piece, then do it. For example, if you can take the opponent Queen with our Rook or the opponent Knight with our pawn, we should do it. I have provided you with the game state, the current position of all pieces, the proposed move, and a list of legal moves the opponent can take. Please reason about this, and state if the move is unreasonable. If the move is unreasonable, please address the biggest threat the opponent has that needs to be addressed. Ensure you evaluate what is gained by the proposed move as well, if we capture their queen and they capture our rook it is still beneficial. If the legal move list contains a move that gives the opponent checkmate, always take that!!! Do not consider any other move if a legal move leads to checkmate.'     
+        self.critic_suffix = 'Please end your response in the following format "STATUS: SUCCESS" or "STATUS: FAIL"'
+        self.critic_opening = 'Try not to move a piece if it has already been moved from its starting square. \
+            There are however exceptions to this rule if there is immediate material gain or a trap/threat from the opponent. \
+            When developing your pieces be cognizant about if you move blocks in other pieces you may have. For example moving a pawn to e3 prevents the bishop on c1 from being developed.'
         self.prefix = 'You are an aggressive chess bot that will evaluate a given game state and list of legal moves and propose \
             the best next move.'
-        self.body = 'Please reason about why you chose this specific move and consider the position your \
-            opponent is in and if they can take advantage of your move. First attempt to identify any weaknesses in the opponents position, \
-            such as an undefended piece, or king safety issues. Your first priority is to look for checks, and examine if any lead to a checkmate, or material gain.\
-            Next, you should examine all captures. Ensure you check all captures and capitalize if the opponent leaves a piece unprotected or not properly defended.\
-            Next, you should consider any attacks you can make on their pieces. Next conclude by identifying which move you think is the strongest.\
-            \
-            We will be conducting this analysis in multiple rounds, after the first round you will also have to consider any passed in critique \
-            about the previously suggested moves. The critique will identify threats you may have overlooked, ensure your next move properly addresses the critique.\
-            \
-            You can only select a move in the list of legal moves provided. Please end your response in the following format "UCI: <UCI-STRING>" with only 1 proposed move.'
-        self.opening_prompt = ' You are still in a chess opening. Keep that in mind when you decide on your move to play. \
-            Here are some key opening principles to keep in mind while deciding your move. \
-            1) Develop your pieces. Get all your pieces out and into the game early, most specifically bishops and knights. \
+        self.body = 'Please reason about why you chose this specific move and consider the position your opponent is in and if they can take advantage of your move. First attempt to identify any weaknesses in the opponents position, such as an undefended piece, or king safety issues. Your first priority is to look for checks, and examine if any lead to a checkmate, or material gain. Ensure you check all captures and capitalize if the opponent leaves a piece unprotected or not properly defended. Next, you should consider any attacks you can make on their pieces. Next conclude by identifying which move you think is the strongest. When judging a trade, keep in mind the value of different pieces: Queen: 9, Rook: 5, Bishop: 3, Knight: 3, Pawn: 1. If you are ahead materially or about tied then encourage even trades. Encourage trading if it results in us being in an improved position. If you can take an opponents piece with a less valuable piece, then do it. For example, if you can take the opponent Queen with our Rook or the opponent Knight with our pawn, we should do it. We will be conducting this analysis in multiple rounds, after the first round you will also have to consider any passed in critique about the previously suggested moves. The critique will identify threats you may have overlooked, ensure your next move properly addresses the critique. If the legal move list contains a move that gives the opponent checkmate, always take that!!! Do not consider any other move if a legal move leads to checkmate. You can only select a move in the list of legal moves provided. Please end your response in the following format "UCI: <UCI-STRING>" with only 1 proposed move.'
+        self.opening_prompt = ' You are still in a chess opening. Keep that in mind when you decide on your move to play. Here are some key opening principles to keep in mind while deciding your move \
+            1) Develop your pieces. Get all your pieces out and into the game early, most specifically bishops and knights. Ensure that the knights and bishops are moved off the 8th rank during the opening. Prioritize developing bishops over knights. Try not to move the same piece twice unless there is an immediate opportunity to gain an advantage. \
             2) Control the center. The center is the most valuable area to control on the chess board in the early game. \
             3) Keep the queen safe. Moving the queen out too far early can make it a target. \
-            4) Castle the king. Develop pieces so the king can castle, and be safe.\
-            Keep in mind all of these concepts are very general, and there are exceptions to each of them. \
-            For example, moving the queen out early is worth it if we are gaining material.\
-            Use these concepts when there is no obvious advantageous move.'
-        self.mid_game_prompt = ' You are now in a chess mid game. Keep that in mind when deciding the optimal move. Find good positions \
-            on the board for your pieces without losing them. Prevent your opponent from getting material advantages and prevent them \
-            from finding good squares for their own pieces.'
+            4) Castle the king. Develop pieces so the king can castle, and be safe. Keep in mind all of these concepts are very general, and there are exceptions to each of them. For example, moving the queen out early is worth it if we are gaining material. Use these concepts when there is no obvious advantageous move.'
+
+        self.mid_game_prompt = ' You are now in a chess mid game. Find good positions on the board for your pieces without losing them. Try to engage in trades that are advantageous for us. Prevent your opponent from getting material advantages and prevent them from finding good squares for their own pieces. Complete piece development (ensure that knights and bishops are not on the 8th rank anymore). Also try to castle if available.'
         self.end_game_prompt = ' You are now in a chess end game. Keep that in mind when you make your move. Make sure to \
             find places on the board where you have the advantage and push on that side of the board while defending your pieces \
             and limiting the opponent\'s ability to push their own advantage. This is also the point in the game where the king becomes \
-            a more valuable piece. Consider activating the king and finding ways where it can help in making progress.'
+            a more valuable piece. Consider activating the king and finding ways where it can help in making progress. \
+            If you have an advantage materially try to push towards a checkmate against the opponent.'
 
     def start_challenge(self, username, fen=None):
         s = requests.Session()
@@ -81,7 +56,7 @@ class ChessClient:
         challenge_body = {
             'keepAliveStream': True,
             'color': 'black',
-            'level': 1,
+            'level': 2,
         }
         if self.fen != None:
             challenge_body['fen'] = self.fen
@@ -151,6 +126,16 @@ class ChessClient:
                 legal[move_key].append(chess.square_name(move.to_square))
         return legal
 
+    def check(self, move):
+        return self.board.gives_check(move)
+
+    def checkmate(self, move):
+        self.board.push(move)
+        checkmate = self.board.is_checkmate()
+        self.board.pop()
+        return checkmate
+
+
     def format_moves(self, legal_move_dict, color):
         out = ''
         for move in legal_move_dict:
@@ -158,8 +143,17 @@ class ChessClient:
             curr_piece = f'{color} {self.pieces[piece].lower()} ({start}): '
             for target in legal_move_dict[move]:
                 captured_piece = self.move_capture(chess.Move.from_uci(f'{start}{target}'))
+                is_check = self.check(chess.Move.from_uci(f'{start}{target}'))
+                if is_check and self.checkmate(chess.Move.from_uci(f'{start}{target}')):
+                    curr_piece += f'{target} (CHECKMATES OPPONENT! PLEASE TAKE THIS MOVE), '
+                    continue
+
+                if is_check and captured_piece != None:
+                    curr_piece += f'{target} (capture {captured_piece}, and gives check to opponent), '
                 if captured_piece != None:
                     curr_piece += f'{target} (capture {captured_piece}), '
+                if is_check:
+                    curr_piece += f'{target} (gives check to opponent), '
                 else:
                     curr_piece += f'{target}, '
             out += curr_piece[:-2] + '\n'
@@ -211,7 +205,7 @@ class ChessClient:
 
     def get_game_status(self):
         moves = self.board.fullmove_number
-        if moves < 8:
+        if moves < 16:
             return 'OPENING'
 
         white_pieces = self.get_piece_positions(True)
@@ -253,10 +247,13 @@ class ChessClient:
         for _ in range(3):
             if game_status == 'OPENING':
                 stage_prompt = self.opening_prompt
+                critic_prompt = f'{self.critic_preamble}\n{self.critic_opening}'
             elif game_status == 'MID':
                 stage_prompt = self.mid_game_prompt
+                critic_prompt = self.critic_preamble
             else:
                 stage_prompt = self.end_game_prompt
+                critic_prompt = self.critic_preamble
 
             prompt = f'{self.color_prompt}{self.prefix}{stage_prompt}{self.body}\nGAME STATE:\n{game_state}\nLEGAL MOVES:\n{legal_moves}\nVISUAL GAME STATE:\n{self.board}\nOPPONENT MOVE:\n{opp_move}\n'
             if captured_by_opp:
@@ -272,7 +269,9 @@ class ChessClient:
             try:
                 move = chess.Move.from_uci(proposed_move)
                 if not self.is_legal(proposed_move):
+                    print('ILLEGAL MOVE')
                     critique = f'The proposed move is illegal! STATUS: FAIL'
+                    continue
             except chess.InvalidMoveError:
                 critique = f'The proposed move is illegal! STATUS: FAIL'
                 continue
@@ -286,11 +285,12 @@ class ChessClient:
 
             self.board.pop()
 
-            critic_prompt = f'{self.critic_preamble}\nGAME STATE:\n{game_state}\nOUR LEGAL MOVES:\n{legal_moves}\nVISUAL GAME STATE:\n{self.board}\nOPPONENT MOVE:\n{opp_move}\nOUR PROPOSED MOVE:\n{proposed_move}\nOPPONENT LEGAL MOVES AFTER OUR PROPOSED MOVE:\n{opp_legal_moves}'
+            critic_prompt = f'{critic_prompt}\nGAME STATE:\n{game_state}\nOUR LEGAL MOVES:\n{legal_moves}\nVISUAL GAME STATE:\n{self.board}\nOPPONENT MOVE:\n{opp_move}\nOUR PROPOSED MOVE:\n{proposed_move}\nOPPONENT LEGAL MOVES AFTER OUR PROPOSED MOVE:\n{opp_legal_moves}'
             if captured_by_opp:
                 prompt += f'\nOPPONENT MOVE RESULTED IN CAPTURE OF FOLLOWING PIECE:\n{captured_by_opp}'
             if captured_by_us:
                 critic_prompt += f'\nOPPONENT PIECE CAPTURED AFTER OUR PROPOSED MOVE:\n{captured_by_us}'
+            critic_prompt += f'\n{self.critic_suffix}'
             print(critic_prompt)
             if not self.is_legal(proposed_move):
                 critique = f'The proposed move is illegal! STATUS: FAIL'
